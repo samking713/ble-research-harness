@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "BLE Research Harness",
+    "slug": "ble-research-harness",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "ble-research",
+    "userInterfaceStyle": "dark",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0a0a"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.research.bleharness",
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "BLE Research Harness needs Bluetooth access to scan for nearby devices and record observations.",
+        "NSBluetoothPeripheralUsageDescription": "BLE Research Harness needs Bluetooth access to scan for nearby devices.",
+        "UIBackgroundModes": ["bluetooth-central"]
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0a0a0a"
+      },
+      "package": "com.research.bleharness",
+      "permissions": [
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": true,
+          "modes": ["central"],
+          "bluetoothAlwaysPermission": "Allow BLE Research Harness to access Bluetooth to scan for nearby devices",
+          "bluetoothPeripheralPermission": "Allow BLE Research Harness to access Bluetooth"
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
