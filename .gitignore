@@ -1,0 +1,36 @@
+node_modules/
+.expo/
+dist/
+build/
+ios/
+android/
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+web-build/
+
+# EAS
+.env
+.env.local
+.env.development
+.env.production
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Research data — do not commit raw observations
+data/
+exports/
+*.jsonl
+*.sqlite
+*.db
