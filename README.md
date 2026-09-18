@@ -31,11 +31,15 @@ A scientific instrument for recording and analyzing Bluetooth Low Energy (BLE) s
 
 | Phase | Status | Description |
 |---|---|---|
-| 1 | TODO | BLE scanner |
-| 2 | TODO | Raw observation database |
-| 3 | TODO | Live dashboard (4 screens) |
-| 4 | TODO | Export (CSV / JSON / JSONL) |
-| 5–10 | Planned | Ground truth, fingerprinting, track association, location/motion, spatial correlation, consumer inference |
+| 1 | IMPLEMENTED | BLE scanner (react-native-ble-plx, allowDuplicates, permissions) |
+| 2 | IMPLEMENTED | Raw observation database (SQLite WAL, all schema fields, batch insert) |
+| 3 | IMPLEMENTED | Live dashboard: Scanner, Raw Observation detail, Experiment + ground-truth labeling, Export |
+| 4 | IMPLEMENTED | Export: JSONL / JSON / CSV + system share sheet |
+| 5 | Planned | Fingerprint analysis (per-byte stability, entropy, service signatures) |
+| 6 | Planned | Track association (deterministic weighted scoring) |
+| 7 | Planned | Location/motion layer |
+| 8 | Planned | Spatial correlation |
+| 9 | Planned | Consumer inference prototype |
 
 ---
 
@@ -101,7 +105,11 @@ The research objective is to determine what legitimate observable signals are su
 
 ---
 
-## Experiment Plan (Phase 5+)
+## Experiment Plan
+
+Ground-truth experiment labeling is implemented in Phase 3 (Experiment screen). The controlled experiments below run once the raw capture system is validated:
+
+
 
 1. Stationary — baseline fingerprint stability
 2. Walk toward/away — RSSI trajectory

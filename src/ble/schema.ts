@@ -7,9 +7,11 @@
  *
  * Platform notes:
  *   iOS:
- *     - bluetooth_address is NOT exposed. The OS sanitizes it. Always null on iOS.
- *     - platform_peripheral_identifier is a CBPeripheral UUID. It rotates per app-install
- *       and per Bluetooth power-cycle. Do NOT treat it as stable hardware identity.
+ *     - bluetooth_address is NOT exposed by the OS. Always null on iOS.
+ *     - platform_peripheral_identifier is a CBPeripheral UUID, recorded exactly as
+ *       CoreBluetooth provides it. Its persistence across app reinstall, Bluetooth
+ *       off/on, phone reboot, and peripheral reboot is an empirical research question
+ *       this harness is designed to answer — do not assume stability or instability.
  *     - solicited_service_uuids and overflow_service_uuids are iOS-specific.
  *     - iOS 13+ no longer exposes MAC addresses to third-party apps at all.
  *
@@ -33,8 +35,8 @@ export interface BLEObservation {
   // ── BLE identity ─────────────────────────────────────────────────────────
   // IMPORTANT: Do NOT assume these fields represent the same underlying identity.
   // Record them separately. They have different stability properties.
-  platform_peripheral_identifier: string | null; // iOS: rotating UUID; Android: MAC
-  bluetooth_address: string | null;              // null on iOS (OS-sanitized)
+  platform_peripheral_identifier: string | null; // iOS: CBPeripheral UUID (rotation behavior is a research question); Android: MAC
+  bluetooth_address: string | null;              // null on iOS (not exposed by OS)
   bluetooth_address_type: string | null;         // 'public' | 'random' | null
   device_identifier_available: boolean;
 
@@ -68,7 +70,10 @@ export interface BLEObservation {
   periodic_advertising_interval: number | null; // Android only — UNCERTAIN: same as above
 
   // ── Scan metadata ─────────────────────────────────────────────────────────
-  scanner_timestamp: string;                   // ISO 8601 when the scanner recorded it
+  // scanner_timestamp is set to Date.now() at the moment our app's scan callback fires.
+  // This is NOT an OS-provided BLE scanner timestamp — react-native-ble-plx does not
+  // expose one. It records when our application received and processed the advertisement.
+  scanner_timestamp: string;                   // ISO 8601 — our app's receive time, not an OS timestamp
   duplicate_filtering_state: 'on' | 'off' | 'unknown';
   scan_session_id: string;
 }

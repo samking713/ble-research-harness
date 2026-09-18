@@ -9,7 +9,7 @@ A scientific instrument for recording and analyzing Bluetooth Low Energy (BLE) s
 - **Framework**: React Native + Expo (TypeScript), SDK 52+
 - **BLE**: `react-native-ble-plx` (requires bare workflow or dev build — NOT Expo Go)
 - **Database**: `expo-sqlite` with SQLite
-- **Navigation**: `@react-navigation/native` + native-stack
+- **Navigation**: Expo Router v4 (file-based, wraps React Navigation)
 - **Export**: `expo-file-system` + `expo-sharing`
 - **Location (Phase 8)**: `expo-location`
 - **Build**: EAS Build for iOS/Android dev clients
@@ -24,45 +24,51 @@ A scientific instrument for recording and analyzing Bluetooth Low Energy (BLE) s
 7. **No ML models** — deterministic weighted scoring only (Phase 7+).
 8. **Only public platform APIs** — no attempts to defeat privacy mechanisms or extract keys.
 
-## Build Phases (implement in order)
-- **Phase 1**: BLE scanner (CoreBluetooth / Android BluetoothLE scan)
-- **Phase 2**: Raw observation database (SQLite schema)
-- **Phase 3**: Live dashboard (4 screens)
-- **Phase 4**: Export (CSV / JSON / JSONL)
-- Phase 5+: Ground-truth labeling, fingerprint analysis, track association, location/motion (NOT YET)
+## Build Phases
+- **Phase 1** ✅ IMPLEMENTED: BLE scanner (react-native-ble-plx, allowDuplicates, permissions)
+- **Phase 2** ✅ IMPLEMENTED: Raw observation database (SQLite WAL, full schema, batch insert)
+- **Phase 3** ✅ IMPLEMENTED: Live dashboard — Scanner, Raw Observation detail, Experiment + ground-truth labeling, Export
+- **Phase 4** ✅ IMPLEMENTED: Export (JSONL / JSON / CSV + share sheet)
+- Phase 5: Fingerprint analysis (NOT YET)
+- Phase 6: Track association / deterministic scoring (NOT YET)
+- Phase 7: Location/motion layer (NOT YET)
+- Phase 8: Spatial correlation (NOT YET)
+- Phase 9: Consumer inference prototype (NOT YET)
 
-## Project Structure
+## Project Structure (actual)
 ```
 ble-research-harness/
-├── app/                        # Expo Router screens
+├── app/
+│   ├── _layout.tsx             # Root Stack + AppProvider
 │   ├── (tabs)/
-│   │   ├── scanner.tsx         # Screen 1: Live Scanner
-│   │   ├── observation.tsx     # Screen 2: Raw Observation detail
-│   │   ├── fingerprint.tsx     # Screen 3: Fingerprint (Phase 6+)
-│   │   └── experiment.tsx      # Screen 4: Experiment / Ground Truth
-│   └── _layout.tsx
+│   │   ├── _layout.tsx         # Tab navigator (Scanner / Experiment / Export)
+│   │   ├── index.tsx           # Screen 1: Live Scanner
+│   │   ├── experiment.tsx      # Screen 3: Experiment + Ground Truth labeling
+│   │   └── export.tsx          # Screen 4: Session list + export
+│   └── observation/
+│       └── [id].tsx            # Screen 2: Raw Observation detail (all fields)
 ├── src/
 │   ├── ble/
-│   │   ├── scanner.ts          # BLE scan session management
+│   │   ├── schema.ts           # BLEObservation interface + helpers
 │   │   ├── adapters/
-│   │   │   ├── ios.ts          # iOS CoreBluetooth adapter
-│   │   │   └── android.ts      # Android BLE adapter
-│   │   └── schema.ts           # BLEObservation TypeScript type
+│   │   │   └── index.ts        # Single adapter for iOS + Android (Platform.OS branch)
+│   │   └── scanner.ts          # BLEScanner singleton (permissions, BT state, scan loop)
 │   ├── db/
-│   │   ├── database.ts         # SQLite init + migrations
-│   │   ├── observations.ts     # observation CRUD
-│   │   ├── sessions.ts         # scan session CRUD
-│   │   └── experiments.ts      # experiment/ground-truth CRUD
+│   │   ├── database.ts         # SQLite init + all table/index creation
+│   │   ├── observations.ts     # insert (single + batch), query
+│   │   ├── sessions.ts         # session CRUD
+│   │   └── experiments.ts      # experiment + ground-truth device CRUD
 │   ├── export/
-│   │   ├── csv.ts
-│   │   ├── json.ts
-│   │   └── jsonl.ts
+│   │   └── index.ts            # JSONL / JSON / CSV + share sheet
+│   ├── context/
+│   │   └── AppContext.tsx      # App state, BLE lifecycle, 500ms batch inserts
 │   └── types/
-│       └── index.ts            # shared types
+│       └── index.ts            # ScanSession, Experiment, GroundTruthDevice, DeviceEntry
 ├── CLAUDE.md
 ├── README.md
 ├── app.json
 ├── package.json
+├── babel.config.js
 └── tsconfig.json
 ```
 
@@ -113,23 +119,24 @@ interface BLEObservation {
   periodic_advertising_interval: number | null;   // Android only
 
   // Scan metadata
-  scanner_timestamp: string;                      // when the scanner recorded it
+  scanner_timestamp: string;                      // our app's receive time (NOT an OS timestamp — ble-plx doesn't expose one)
   duplicate_filtering_state: 'on' | 'off' | 'unknown';
   scan_session_id: string;
 }
 ```
 
-## SQLite Tables (§19)
+## SQLite Tables (implemented)
 ```sql
-experiments, ground_truth_devices, scan_sessions, ble_observations,
-fingerprint_features, device_tracks, track_observations,
-location_observations, motion_observations, experiment_labels
+scan_sessions, ble_observations, experiments, ground_truth_devices, experiment_labels
 ```
-Index on: `timestamp`, `scan_session_id`, `platform_peripheral_identifier`,
-`bluetooth_address`, `manufacturer_id`, `track_id`, `experiment_id`.
+Index on: `timestamp_utc`, `scan_session_id`, `platform_peripheral_identifier`,
+`bluetooth_address`, `manufacturer_id`, `experiment_id`.
+
+Tables for Phase 5+ (not yet created): `fingerprint_features`, `device_tracks`,
+`track_observations`, `location_observations`, `motion_observations`.
 
 ## Key Platform Notes
-- **iOS**: `CBPeripheral.identifier` is a UUID that rotates per app install / BT off-on — NOT stable. `bluetooth_address` is NOT exposed. `solicited_service_uuids` and `overflow_service_uuids` are iOS-specific.
+- **iOS**: `CBPeripheral.identifier` is a UUID recorded exactly as CoreBluetooth provides it. Its persistence across app reinstall, BT off/on, phone reboot, and peripheral reboot is an **empirical research question** — do not assume stable or unstable. `bluetooth_address` is NOT exposed by iOS. `solicited_service_uuids` and `overflow_service_uuids` are iOS-specific.
 - **Android**: MAC address IS available (though may be randomized). `advertising_sid`, `primary_phy`, `secondary_phy`, `periodic_advertising_interval` are Android-only (API 26+).
 - **Background scanning**: iOS CoreBluetooth background mode requires `bluetooth-central` UIBackgroundMode. iOS 26 changed some background CBPeripheral behavior — document what actually works.
 - **react-native-ble-plx**: Use `BleManager.startDeviceScan()`. Map its `Device` object to `BLEObservation` in the platform adapter.

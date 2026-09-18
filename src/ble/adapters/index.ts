@@ -7,9 +7,9 @@
  * Field availability by platform:
  *
  *   Field                          iOS       Android   Notes
- *   platform_peripheral_identifier  ✓ (rot)  ✓ (MAC)  iOS rotates per app/BT restart
- *   bluetooth_address               ✗        ✓         iOS never exposes MAC
- *   bluetooth_address_type          ✗        partial   ble-plx does not expose this
+ *   platform_peripheral_identifier  ✓        ✓ (MAC)  iOS: CBPeripheral UUID; persistence is a research question
+ *   bluetooth_address               ✗        ✓         iOS: not exposed by OS
+ *   bluetooth_address_type          ✗        null      not exposed by ble-plx on either platform
  *   local_name                      ✓        ✓
  *   manufacturer_data_raw           ✓        ✓
  *   service_uuids                   ✓        ✓
@@ -19,10 +19,10 @@
  *   rssi                            ✓        ✓
  *   tx_power                        ✓        ✓
  *   is_connectable                  ✓        ✓
- *   advertising_sid                 ✗        partial   raw scan record parsing needed
- *   primary_phy                     ✗        partial   raw scan record parsing needed
- *   secondary_phy                   ✗        partial   raw scan record parsing needed
- *   periodic_advertising_interval   ✗        partial   raw scan record parsing needed
+ *   advertising_sid                 ✗        null      not exposed by ble-plx Device API
+ *   primary_phy                     ✗        null      not exposed by ble-plx Device API
+ *   secondary_phy                   ✗        null      not exposed by ble-plx Device API
+ *   periodic_advertising_interval   ✗        null      not exposed by ble-plx Device API
  */
 import { Platform } from 'react-native';
 import { Device } from 'react-native-ble-plx';
@@ -66,8 +66,10 @@ export function mapDeviceToObservation(
 
     // ── BLE identity ──────────────────────────────────────────────────────
     // iOS: device.id is a CBPeripheral UUID — NOT a hardware address.
-    //      It rotates when the app is reinstalled or Bluetooth is toggled.
-    // Android: device.id IS the MAC address string (may be randomized).
+    //      Whether it persists across app reinstall, BT off/on, phone reboot, or
+    //      peripheral reboot is an empirical research question this harness measures.
+    //      Record it exactly as CoreBluetooth provides it.
+    // Android: device.id IS the MAC address string (may be randomized by the OS).
     platform_peripheral_identifier: device.id ?? null,
     bluetooth_address: isIOS ? null : (device.id ?? null),
     // UNCERTAIN: react-native-ble-plx does not expose address type directly.
@@ -104,16 +106,19 @@ export function mapDeviceToObservation(
     tx_power: device.txPowerLevel ?? null,
     is_connectable: device.isConnectable ?? null,
 
-    // UNCERTAIN: advertising_sid, primary_phy, secondary_phy, and
-    // periodic_advertising_interval require parsing device.rawScanRecord
-    // (Android-only field). These are not directly exposed by ble-plx.
-    // Set to null for v0.1; future work: implement rawScanRecord parser.
+    // NOT AVAILABLE in current adapter: advertising_sid, primary_phy, secondary_phy,
+    // and periodic_advertising_interval are not exposed by the react-native-ble-plx
+    // Device object. They are retained in the schema for future collection and are
+    // stored as null by this adapter. Do not implement rawScanRecord parsing until
+    // it can be done reliably and validated against ground-truth devices.
     advertising_sid: null,
     primary_phy: null,
     secondary_phy: null,
     periodic_advertising_interval: null,
 
     // ── Scan metadata ──────────────────────────────────────────────────────
+    // Our app's receive time — when this scan callback fired in our JS process.
+    // react-native-ble-plx does not provide an OS-level BLE scanner timestamp.
     scanner_timestamp: now.toISOString(),
     duplicate_filtering_state: duplicateFilteringState,
     scan_session_id: sessionId,

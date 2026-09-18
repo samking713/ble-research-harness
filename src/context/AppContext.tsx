@@ -19,7 +19,7 @@ import { BLEObservation, generateId } from '../ble/schema';
 import { BLEScanner } from '../ble/scanner';
 import { DeviceEntry, Experiment, GroundTruthDevice, ScanSession } from '../types';
 import { getDatabase } from '../db/database';
-import { insertObservation, getObservation, getSessionObservations } from '../db/observations';
+import { insertObservationsBatch, getObservation, getSessionObservations } from '../db/observations';
 import {
   createSession, endSession, getSessions, getSession,
 } from '../db/sessions';
@@ -101,29 +101,50 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       .catch(e => console.error('[AppContext] DB init failed:', e));
   }, []);
 
-  // Flush pending observations to DB and refresh UI on interval.
+  // Flush all pending observations to SQLite immediately (no timer).
+  // Safe to call multiple times; does nothing if queue is empty.
+  const flushPending = useCallback(async (): Promise<number> => {
+    const batch = pendingObsRef.current.splice(0);
+    if (batch.length === 0) return 0;
+    try {
+      await insertObservationsBatch(batch);
+      setObsCount(n => n + batch.length);
+    } catch (e) {
+      console.error('[AppContext] DB flush error:', e);
+    }
+    return batch.length;
+  }, []);
+
+  // Schedule a batched flush + UI refresh every 500 ms.
   const scheduleBatch = useCallback(() => {
     if (batchTimerRef.current) return;
     batchTimerRef.current = setTimeout(async () => {
       batchTimerRef.current = null;
 
-      const batch = pendingObsRef.current.splice(0);
-      if (batch.length > 0) {
-        // Persist to SQLite
-        try {
-          for (const obs of batch) await insertObservation(obs);
-        } catch (e) {
-          console.error('[AppContext] DB insert error:', e);
-        }
-        setObsCount(n => n + batch.length);
-      }
+      await flushPending();
 
-      // Update sorted device list from in-memory map
+      // Refresh sorted device list from in-memory map
       const sorted = [...deviceMapRef.current.values()].sort(
         (a, b) => b.latest.rssi - a.latest.rssi,
       );
       setDevices(sorted);
-    }, 500); // batch every 500ms
+    }, 500);
+  }, [flushPending]);
+
+  // Best-effort flush on unmount (fire-and-forget — can't await in cleanup).
+  useEffect(() => {
+    return () => {
+      if (batchTimerRef.current) {
+        clearTimeout(batchTimerRef.current);
+        batchTimerRef.current = null;
+      }
+      const remaining = pendingObsRef.current.splice(0);
+      if (remaining.length > 0) {
+        insertObservationsBatch(remaining).catch(e =>
+          console.error('[AppContext] flush on unmount failed:', e),
+        );
+      }
+    };
   }, []);
 
   const startScan = useCallback(async () => {
@@ -193,14 +214,25 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [isScanning, scheduleBatch]);
 
   const stopScan = useCallback(async () => {
+    // Stop the radio first so no new packets arrive while we flush.
     BLEScanner.getInstance().stop();
     setIsScanning(false);
+
+    // Cancel the scheduled batch timer and flush all queued observations
+    // synchronously before writing the session end time. This guarantees
+    // no observations are silently discarded when STOP is pressed.
+    if (batchTimerRef.current) {
+      clearTimeout(batchTimerRef.current);
+      batchTimerRef.current = null;
+    }
+    await flushPending();
+
     if (currentSession) {
       const endedAt = new Date().toISOString();
       await endSession(currentSession.id, endedAt);
       setCurrentSession(s => s ? { ...s, ended_at: endedAt } : null);
     }
-  }, [currentSession]);
+  }, [currentSession, flushPending]);
 
   const createNewExperiment = useCallback(
     async (
