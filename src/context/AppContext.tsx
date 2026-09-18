@@ -93,6 +93,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const deviceMapRef = useRef<Map<string, DeviceEntry>>(new Map());
   const pendingObsRef = useRef<BLEObservation[]>([]);
   const batchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mutex: prevents two concurrent flushes from racing on the same queue.
+  const flushingRef = useRef(false);
 
   // Initialize DB on mount.
   useEffect(() => {
@@ -102,17 +104,41 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Flush all pending observations to SQLite immediately (no timer).
-  // Safe to call multiple times; does nothing if queue is empty.
+  //
+  // Correctness contract:
+  //   - Observations are only removed from the queue AFTER the SQLite transaction
+  //     succeeds. A failed transaction leaves them in place for the next retry.
+  //   - Uses slice()+splice(n) rather than splice(0) up-front, so observations
+  //     appended by the scan callback during an async transaction are not lost.
+  //   - INSERT OR IGNORE on observation_id makes retries idempotent — already-
+  //     persisted rows are silently skipped; new rows are written.
+  //   - flushingRef prevents two concurrent callers from operating on the same
+  //     items simultaneously. If a flush is already in progress the caller returns
+  //     immediately; the in-flight flush will drain the queue.
   const flushPending = useCallback(async (): Promise<number> => {
-    const batch = pendingObsRef.current.splice(0);
-    if (batch.length === 0) return 0;
+    if (flushingRef.current) return 0;
+    flushingRef.current = true;
+
+    const count = pendingObsRef.current.length;
+    if (count === 0) {
+      flushingRef.current = false;
+      return 0;
+    }
+
+    // Snapshot without removing — observations stay in the queue until success.
+    const batch = pendingObsRef.current.slice(0, count);
     try {
       await insertObservationsBatch(batch);
-      setObsCount(n => n + batch.length);
+      // Remove exactly the items we flushed. Items pushed after slice() remain.
+      pendingObsRef.current.splice(0, count);
+      setObsCount(n => n + count);
+      flushingRef.current = false;
+      return count;
     } catch (e) {
-      console.error('[AppContext] DB flush error:', e);
+      console.error('[AppContext] DB flush error — observations retained for retry:', e);
+      flushingRef.current = false;
+      return 0;
     }
-    return batch.length;
   }, []);
 
   // Schedule a batched flush + UI refresh every 500 ms.
@@ -131,16 +157,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }, 500);
   }, [flushPending]);
 
-  // Best-effort flush on unmount (fire-and-forget — can't await in cleanup).
+  // Best-effort flush on unmount (fire-and-forget — cannot await in cleanup).
+  // Does not splice the queue on success because we cannot confirm completion
+  // synchronously; INSERT OR IGNORE ensures no duplicates if the component
+  // remounts and the same observations are retried.
   useEffect(() => {
     return () => {
       if (batchTimerRef.current) {
         clearTimeout(batchTimerRef.current);
         batchTimerRef.current = null;
       }
-      const remaining = pendingObsRef.current.splice(0);
-      if (remaining.length > 0) {
-        insertObservationsBatch(remaining).catch(e =>
+      // If a flush is already in progress, let it complete — don't race it.
+      if (!flushingRef.current && pendingObsRef.current.length > 0) {
+        const snapshot = pendingObsRef.current.slice();
+        insertObservationsBatch(snapshot).catch(e =>
           console.error('[AppContext] flush on unmount failed:', e),
         );
       }
@@ -177,7 +207,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const result = await scanner.start(
       sessionId,
       obs => {
-        // Called for every BLE packet (potentially hundreds/second).
+        // Called for each scan result delivered by the OS/library.
+        // Duplicate results are enabled; rate depends on device density and scan mode.
         // Do minimal work here — queue for batch processing.
         const key = obs.platform_peripheral_identifier ?? obs.observation_id;
         const existing = deviceMapRef.current.get(key);

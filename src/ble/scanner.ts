@@ -2,7 +2,10 @@
  * BLE scanner module.
  *
  * Wraps react-native-ble-plx BleManager. Manages scan sessions.
- * Calls back with a normalized BLEObservation for each advertisement packet.
+ * Calls back with a normalized BLEObservation for each scan result delivered
+ * by the OS/library. Duplicate results are enabled where supported so that
+ * each delivery to the application is recorded — we are not claiming that
+ * every RF advertisement transmitted by a peripheral reaches the callback.
  *
  * Usage:
  *   const scanner = BLEScanner.getInstance();
@@ -117,10 +120,11 @@ export class BLEScanner {
     this.sessionId = sessionId;
     this.scanning = true;
 
-    // allowDuplicates:true — receive every advertisement packet, not just one per device.
-    // This is essential for RSSI tracking and advertising-interval measurement.
-    // On iOS, this requires setting allowDuplicatesKey in CBCentralManagerScanOptionAllowDuplicatesKey.
-    // On Android, ScanMode.LowLatency gives fastest update rate.
+    // allowDuplicates:true — request that the OS/library deliver each scan result
+    // rather than coalescing duplicates per device. Essential for RSSI tracking
+    // and advertising-interval measurement.
+    // iOS: maps to CBCentralManagerScanOptionAllowDuplicatesKey = true.
+    // Android: ScanMode.LowLatency requests the fastest delivery rate from the stack.
     this.manager.startDeviceScan(
       null, // scan all service UUIDs
       {

@@ -132,20 +132,39 @@ export async function getSessionObservationCount(
   return result?.count ?? 0;
 }
 
+/**
+ * Return the single most-recent observation for each unique device seen in a session.
+ *
+ * "Most recent" is determined by MAX(timestamp_monotonic) — the app-relative
+ * monotonic clock captured when our scan callback fired. This is reliable within
+ * a single app session and avoids the UUID lexical-sort trap.
+ *
+ * Device grouping key: COALESCE(platform_peripheral_identifier, observation_id)
+ * — devices without an identifier each form their own group.
+ *
+ * Ties on timestamp_monotonic are vanishingly unlikely (performance.now() has
+ * sub-ms resolution and JS is single-threaded), but if they occur the INNER JOIN
+ * will return both rows for that device; the caller should handle that gracefully.
+ */
 export async function getLatestObservationsPerDevice(
   sessionId: string,
 ): Promise<BLEObservation[]> {
   const db = await getDatabase();
   const rows = await db.getAllAsync<Record<string, unknown>>(
-    `SELECT * FROM ble_observations
-     WHERE scan_session_id = ?
-       AND observation_id IN (
-         SELECT observation_id FROM ble_observations
-         WHERE scan_session_id = ?
-         GROUP BY COALESCE(platform_peripheral_identifier, observation_id)
-         HAVING observation_id = MAX(observation_id)
-       )
-     ORDER BY rssi DESC`,
+    `SELECT o.*
+     FROM ble_observations o
+     INNER JOIN (
+       SELECT
+         COALESCE(platform_peripheral_identifier, observation_id) AS device_key,
+         MAX(timestamp_monotonic) AS max_mono
+       FROM ble_observations
+       WHERE scan_session_id = ?
+       GROUP BY device_key
+     ) latest
+       ON  COALESCE(o.platform_peripheral_identifier, o.observation_id) = latest.device_key
+       AND o.timestamp_monotonic = latest.max_mono
+       AND o.scan_session_id = ?
+     ORDER BY o.rssi DESC`,
     [sessionId, sessionId],
   );
   return rows.map(deserialize);
